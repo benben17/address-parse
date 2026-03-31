@@ -1,0 +1,9 @@
+services:
+  address-parser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: address-parser
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
