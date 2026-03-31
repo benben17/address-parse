@@ -35,6 +35,7 @@ PHONE_ADJACENT_NAME_PATTERN = re.compile(
     rf"(?=(?:\+?86[-\s]?)?(?:1[3-9]\d{{9}}|0\d{{2,3}}-?\d{{7,8}}))"
 )
 COUNTY_TOKEN_PATTERN = re.compile(r"([\u4e00-\u9fff]{2,8}(?:区|县|旗|市))")
+LEADING_CHINESE_BLOCK_PATTERN = re.compile(r"^\s*([\u4e00-\u9fff]{2,12})")
 LEADING_SEPARATORS = " ，,：:;；/"
 ADDRESS_HINT_CHARS = "省市区县旗乡镇街道路巷村社区苑号栋单元室园厦"
 LEADING_NAME_PATTERN = re.compile(r"^\s*([\u4e00-\u9fff]{2,4})(?:[\s,，;；/]+)(.+)$")
@@ -266,6 +267,7 @@ class AddressExtractionService:
         strip_tokens = []
         road_poi_match: RoadPOIMatch | None = None
         town_match: TownMatch | None = None
+        fuzzy_city_token: str | None = None
 
         exact_provinces = sorted({record.province for record in exact_mentions["province"]})
         exact_cities = sorted({record.city for record in exact_mentions["city"] if record.city})
@@ -311,6 +313,12 @@ class AddressExtractionService:
                         source = "exact_city_disambiguated"
 
         if selected is None and not alternatives:
+            fuzzy_city_token, fuzzy_city_record = self._try_fuzzy_city(text, exact_provinces)
+            if fuzzy_city_record is not None:
+                selected = fuzzy_city_record
+                source = "fuzzy_city_pinyin"
+
+        if selected is None and not alternatives:
             if jio_path is not None and cpca_path is not None and self._paths_agree(jio_path, cpca_path):
                 selected = self._deeper_path(jio_path, cpca_path)
                 source = "jionlp_cpca_consensus"
@@ -328,6 +336,31 @@ class AddressExtractionService:
                 auto_corrected = True
                 if any(item["field"] == "city" for item in field_corrections):
                     needs_review = True
+
+        if fuzzy_city_token is not None and selected is not None and source == "fuzzy_city_pinyin":
+            auto_corrected = True
+            needs_review = True
+            strip_tokens.append(fuzzy_city_token)
+            corrections.append(
+                {
+                    "field": "city",
+                    "from": fuzzy_city_token,
+                    "to": selected.city,
+                    "reason": "fuzzy_city_pinyin",
+                }
+            )
+
+        if (
+            selected is not None
+            and selected.county is None
+            and jio_path is not None
+            and jio_path.county is not None
+            and jio_path.province == selected.province
+            and jio_path.city == selected.city
+        ):
+            selected = jio_path
+            source = "jionlp_county_hint"
+            auto_corrected = True
 
         fuzzy_token = None
         if selected is not None and selected.city and selected.county is None:
@@ -395,6 +428,7 @@ class AddressExtractionService:
             road_poi_correction = self._try_road_poi_conflict_correction(
                 text,
                 selected,
+                source,
                 jio_result,
                 cpca_result,
                 exact_provinces,
@@ -437,6 +471,11 @@ class AddressExtractionService:
         if selected is not None and source == "cpca":
             needs_review = True
             warnings.append("当前结果仅由 CPCA 支撑，建议结合业务字段或人工复核。")
+
+        if selected is not None and (selected.county or jio_result.get("county")) is None:
+            needs_review = True
+            if "当前仅识别到省市，缺少区县，建议人工复核。" not in warnings:
+                warnings.append("当前仅识别到省市，缺少区县，建议人工复核。")
 
         province = selected.province if selected else None
         city = selected.city if selected else None
@@ -556,6 +595,30 @@ class AddressExtractionService:
                 return token, fuzzy_record
         return None, None
 
+    def _try_fuzzy_city(
+        self,
+        text: str,
+        exact_provinces: list[str],
+    ) -> tuple[str | None, AdminRecord | None]:
+        match = LEADING_CHINESE_BLOCK_PATTERN.match(text)
+        if not match:
+            return None, None
+
+        province_hint = exact_provinces[0] if len(exact_provinces) == 1 else None
+        leading_block = match.group(1).strip()
+        max_length = min(6, len(leading_block))
+
+        for length in range(max_length, 2, -1):
+            fragment = leading_block[:length]
+            candidate = self.admin_index.fuzzy_match(
+                "city",
+                fragment,
+                province=province_hint,
+            )
+            if candidate is not None:
+                return fragment, candidate
+        return None, None
+
     def _try_road_poi_fallback(
         self,
         text: str,
@@ -595,27 +658,39 @@ class AddressExtractionService:
         self,
         text: str,
         selected: AdminRecord,
+        source: str,
         jio_result: dict,
         cpca_result: dict,
         exact_provinces: list[str],
         exact_cities: list[str],
     ) -> tuple[RoadPOIMatch, AdminRecord] | None:
         if selected.province is None or selected.city is None or selected.county is None:
-            return None
+            if source != "fuzzy_city_pinyin":
+                return None
 
-        match = self._try_road_poi_fallback(
-            text,
-            selected,
-            jio_result,
-            cpca_result,
-            exact_provinces,
-            exact_cities,
-        )
+        if source == "fuzzy_city_pinyin":
+            match = None
+            candidate_sources = [
+                jio_result.get("detail") or "",
+                cpca_result.get("detail") or "",
+                text,
+            ]
+            for candidate_text in candidate_sources:
+                if not candidate_text:
+                    continue
+                match = self.road_poi_index.match(candidate_text)
+                if match is not None:
+                    break
+        else:
+            match = self._try_road_poi_fallback(
+                text,
+                selected,
+                jio_result,
+                cpca_result,
+                exact_provinces,
+                exact_cities,
+            )
         if match is None:
-            return None
-        if match.province != selected.province or match.city != selected.city:
-            return None
-        if match.county == selected.county:
             return None
 
         corrected = self.admin_index.match_path(
@@ -624,6 +699,18 @@ class AddressExtractionService:
             county=match.county,
         )
         if corrected is None:
+            return None
+
+        if source == "fuzzy_city_pinyin":
+            current_depth = sum(1 for item in (selected.province, selected.city, selected.county) if item)
+            corrected_depth = sum(1 for item in (corrected.province, corrected.city, corrected.county) if item)
+            if corrected_depth <= current_depth:
+                return None
+            return match, corrected
+
+        if match.province != selected.province or match.city != selected.city:
+            return None
+        if match.county == selected.county:
             return None
         return match, corrected
 

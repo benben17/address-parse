@@ -1,0 +1,26 @@
+{
+  "raw_counts": {
+    "pvc": 34,
+    "city": 340,
+    "local": 452,
+    "local_county": 4789,
+    "local_area": 42129
+  },
+  "missing_province_parent_rows": 3,
+  "missing_city_parent_rows": 4,
+  "missing_county_parent_rows": 115,
+  "clean_counts": {
+    "provinces": 34,
+    "cities": 359,
+    "counties": 3017,
+    "towns": 43878,
+    "city_telcodes": 339
+  },
+  "current_counts": {
+    "provinces": 34,
+    "cities": 328,
+    "counties": 2650,
+    "towns": 30120,
+    "city_telcodes": 307
+  }
+}

@@ -4,9 +4,10 @@ import csv
 from collections import defaultdict
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from importlib import resources
+from pathlib import Path
 
 import ahocorasick
+from pypinyin import lazy_pinyin
 
 
 DIRECT_ADMIN_PROVINCES = {"北京市", "上海市", "天津市", "重庆市"}
@@ -16,6 +17,25 @@ PLACEHOLDER_CITY_NAMES = {
     "省直辖县级行政区划",
     "自治区直辖县级行政区划",
 }
+CITY_SUFFIXES = (
+    "特别行政区",
+    "自治州",
+    "地区",
+    "盟",
+    "市",
+)
+COUNTY_SUFFIXES = (
+    "自治县",
+    "自治旗",
+    "矿区",
+    "林区",
+    "特区",
+    "新区",
+    "区",
+    "县",
+    "旗",
+    "市",
+)
 
 
 @dataclass(frozen=True)
@@ -46,49 +66,78 @@ class AdminIndex:
         self.records_by_name: dict[str, list[AdminRecord]] = defaultdict(list)
         self.counties_by_city: dict[tuple[str, str], list[AdminRecord]] = defaultdict(list)
         self.counties_by_province: dict[str, list[AdminRecord]] = defaultdict(list)
+        self.fuzzy_variants_by_key: dict[tuple[str, str], list[tuple[str, str]]] = {}
+        self.pinyin_index_by_rank: dict[str, dict[str, list[AdminRecord]]] = {
+            "city": defaultdict(list),
+            "county": defaultdict(list),
+        }
         self._load()
         self._build_matcher()
+        self._build_pinyin_index()
 
     def _load(self) -> None:
-        with resources.as_file(resources.files("cpca.resources").joinpath("adcodes.csv")) as csv_path:
-            with csv_path.open(encoding="utf-8") as file_obj:
-                rows = list(csv.DictReader(file_obj))
+        clean_dir = Path(__file__).resolve().parents[1] / "data" / "clean"
+        province_path = clean_dir / "provinces.csv"
+        city_path = clean_dir / "cities.csv"
+        county_path = clean_dir / "counties.csv"
 
-        name_by_adcode = {row["adcode"][:6]: row["name"] for row in rows}
+        with province_path.open(encoding="utf-8", newline="") as file_obj:
+            province_rows = list(csv.DictReader(file_obj))
+        with city_path.open(encoding="utf-8", newline="") as file_obj:
+            city_rows = list(csv.DictReader(file_obj))
+        with county_path.open(encoding="utf-8", newline="") as file_obj:
+            county_rows = list(csv.DictReader(file_obj))
 
-        for row in rows:
-            adcode = row["adcode"][:6]
-            name = row["name"]
-            if adcode.endswith("0000"):
-                rank = "province"
-                province = name
-                city = None
-                county = None
-            elif adcode.endswith("00"):
-                rank = "city"
-                province = name_by_adcode[f"{adcode[:2]}0000"]
-                city = self._normalize_city_name(province, name)
-                county = None
-            else:
-                rank = "county"
-                province = name_by_adcode[f"{adcode[:2]}0000"]
-                raw_city = name_by_adcode.get(f"{adcode[:4]}00")
-                city = self._normalize_city_name(province, raw_city)
-                county = name
-
-            record = AdminRecord(
-                adcode=adcode,
-                name=name,
-                rank=rank,
-                province=province,
-                city=city,
-                county=county,
+        for row in province_rows:
+            if row.get("enabled") != "1":
+                continue
+            self._add_record(
+                AdminRecord(
+                    adcode=row["province_code"],
+                    name=row["province_name"],
+                    rank="province",
+                    province=row["province_name"],
+                    city=None,
+                    county=None,
+                )
             )
-            self.records_by_rank_name[rank][name].append(record)
-            self.records_by_name[name].append(record)
-            if rank == "county" and city is not None:
-                self.counties_by_city[(province, city)].append(record)
-                self.counties_by_province[province].append(record)
+
+        for row in city_rows:
+            if row.get("enabled") != "1":
+                continue
+            city_name = self._normalize_city_name(row["province_name"], row["city_name"])
+            self._add_record(
+                AdminRecord(
+                    adcode=row["source_id"],
+                    name=city_name,
+                    rank="city",
+                    province=row["province_name"],
+                    city=city_name,
+                    county=None,
+                )
+            )
+
+        for row in county_rows:
+            if row.get("enabled") != "1":
+                continue
+            city_name = self._normalize_city_name(row["province_name"], row["city_name"])
+            self._add_record(
+                AdminRecord(
+                    adcode=row["source_id"],
+                    name=row["county_name"],
+                    rank="county",
+                    province=row["province_name"],
+                    city=city_name,
+                    county=row["county_name"],
+                )
+            )
+
+    def _add_record(self, record: AdminRecord) -> None:
+        self.records_by_rank_name[record.rank][record.name].append(record)
+        self.records_by_name[record.name].append(record)
+        if record.rank == "county" and record.city is not None:
+            self.counties_by_city[(record.province, record.city)].append(record)
+            self.counties_by_province[record.province].append(record)
 
     @staticmethod
     def _normalize_city_name(province: str, city: str | None) -> str | None:
@@ -105,6 +154,22 @@ class AdminIndex:
         for name in self.records_by_name:
             self.matcher.add_word(name, name)
         self.matcher.make_automaton()
+
+    def _build_pinyin_index(self) -> None:
+        for rank in ("city", "county"):
+            for records in self.records_by_rank_name[rank].values():
+                for record in records:
+                    key = (rank, record.adcode)
+                    variants = []
+                    seen = set()
+                    for variant in self._name_variants(self._display_name(rank, record), rank):
+                        pinyin = self._to_pinyin(variant)
+                        if not pinyin or (variant, pinyin) in seen:
+                            continue
+                        seen.add((variant, pinyin))
+                        variants.append((variant, pinyin))
+                        self.pinyin_index_by_rank[rank][pinyin].append(record)
+                    self.fuzzy_variants_by_key[key] = variants
 
     def find_exact_mentions(self, text: str) -> dict[str, list[AdminRecord]]:
         mentions = {
@@ -160,13 +225,39 @@ class AdminIndex:
     def city_candidates(self, city_name: str) -> list[AdminRecord]:
         return list(self.records_by_rank_name["city"].get(city_name, []))
 
+    @staticmethod
+    def _display_name(rank: str, record: AdminRecord) -> str | None:
+        if rank == "county":
+            return record.county
+        if rank == "city":
+            return record.city
+        return None
+
+    @staticmethod
+    def _to_pinyin(text: str) -> str:
+        return "".join(lazy_pinyin(text))
+
+    @staticmethod
+    def _name_variants(name: str | None, rank: str) -> list[str]:
+        if not name:
+            return []
+        variants = [name]
+        suffixes = CITY_SUFFIXES if rank == "city" else COUNTY_SUFFIXES
+        for suffix in suffixes:
+            if name.endswith(suffix) and len(name) > len(suffix):
+                stripped = name[: -len(suffix)]
+                if len(stripped) >= 2:
+                    variants.append(stripped)
+                break
+        return variants
+
     def fuzzy_match(
         self,
         rank: str,
         fragment: str,
         province: str | None = None,
         city: str | None = None,
-        min_ratio: float = 0.66,
+        min_ratio: float = 0.80,
     ) -> AdminRecord | None:
         fragment = fragment.strip()
         if len(fragment) < 2:
@@ -192,22 +283,30 @@ class AdminIndex:
         if not candidates:
             return None
 
+        if rank == "city" and province is None and len(fragment) < 3:
+            return None
+
+        fragment_pinyin = self._to_pinyin(fragment)
         best_record = None
         best_score = 0.0
         second_best = 0.0
 
         for candidate in candidates:
-            if rank == "county":
-                candidate_name = candidate.county
-            else:
-                candidate_name = candidate.city
-            if not candidate_name:
+            candidate_variants = self.fuzzy_variants_by_key.get((rank, candidate.adcode), [])
+            if not candidate_variants:
                 continue
-            score = SequenceMatcher(None, fragment, candidate_name).ratio()
-            if len(fragment) == len(candidate_name):
-                score += 0.04
-            if fragment[-1] == candidate_name[-1]:
-                score += 0.04
+            score = 0.0
+            for candidate_name, candidate_pinyin in candidate_variants:
+                char_score = SequenceMatcher(None, fragment, candidate_name).ratio()
+                pinyin_score = SequenceMatcher(None, fragment_pinyin, candidate_pinyin).ratio()
+                variant_score = 0.58 * char_score + 0.42 * pinyin_score
+                if len(fragment) == len(candidate_name):
+                    variant_score += 0.04
+                if fragment[-1] == candidate_name[-1]:
+                    variant_score += 0.04
+                if fragment_pinyin == candidate_pinyin:
+                    variant_score += 0.06
+                score = max(score, variant_score)
             if score > best_score:
                 second_best = best_score
                 best_score = score

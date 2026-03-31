@@ -81,6 +81,19 @@ def test_corrects_wrong_province_when_only_city_is_valid() -> None:
     assert result["address"]["standardized"] == "广东省广州市体育西路101号"
 
 
+def test_fuzzy_corrects_city_typo_by_pinyin_similarity() -> None:
+    result = service.parse_text("乌鲁木气友好路1号")
+    assert result["address"]["province"] == "新疆维吾尔自治区"
+    assert result["address"]["city"] == "乌鲁木齐市"
+    assert result["address"]["county"] is None
+    assert result["address"]["detail"] == "友好路1号"
+    assert result["address"]["standardized"] == "新疆维吾尔自治区乌鲁木齐市友好路1号"
+    assert result["address"]["resolved_by"] == "fuzzy_city_pinyin"
+    assert result["address"]["auto_corrected"] is True
+    assert result["address"]["needs_review"] is True
+    assert any(item["field"] == "city" and item["from"] == "乌鲁木气" for item in result["address"]["corrections"])
+
+
 def test_removes_residual_typo_after_jionlp_county_correction() -> None:
     result = service.parse_text("北京市朝阳曲望京SOHO")
     assert result["address"]["province"] == "北京市"
@@ -235,6 +248,21 @@ def test_corrects_wrong_county_by_high_confidence_road_keyword() -> None:
     assert result["address"]["needs_review"] is True
     assert result["address"]["resolved_by"] == "road_conflict_correction"
     assert any(item["field"] == "county" and item["to"] == "朝阳区" for item in result["address"]["corrections"])
+
+
+def test_fuzzy_city_typo_can_be_overridden_by_high_confidence_road_keyword() -> None:
+    result = service.parse_text("乌鲁木气酒仙桥东路1号m3c大厦A座1101室 王先生13511112222")
+    assert result["person"]["name"] == "王先生"
+    assert result["address"]["province"] == "北京市"
+    assert result["address"]["city"] == "北京市"
+    assert result["address"]["county"] == "朝阳区"
+    assert result["address"]["detail"] == "酒仙桥东路1号m3c大厦A座1101室"
+    assert result["address"]["standardized"] == "北京市朝阳区酒仙桥东路1号m3c大厦A座1101室"
+    assert result["address"]["resolved_by"] == "road_conflict_correction"
+    assert result["address"]["auto_corrected"] is True
+    assert result["address"]["needs_review"] is True
+    assert any(item["field"] == "city" and item["from"] == "乌鲁木气" for item in result["address"]["corrections"])
+    assert any(item["field"] == "province" and item["to"] == "北京市" for item in result["address"]["corrections"])
 
 
 def test_does_not_split_road_name_into_town_alias() -> None:

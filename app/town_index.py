@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import contextlib
-import io
+import csv
 from collections import defaultdict
 from dataclasses import dataclass
-
-
-with contextlib.redirect_stdout(io.StringIO()):
-    from jionlp.dictionary.dictionary_loader import china_location_loader
+from pathlib import Path
 
 
 TOWN_SUFFIXES = (
@@ -55,6 +51,9 @@ JOINED_ROAD_NAME_PREFIXES = (
     "北街",
     "中街",
 )
+TOWN_NAME_OVERRIDES = {
+    ("重庆市", "重庆市", "忠县", "忠州镇"): ("忠州街道", "忠州"),
+}
 
 
 @dataclass(frozen=True)
@@ -91,33 +90,31 @@ class TownIndex:
         self._load()
 
     def _load(self) -> None:
-        china = china_location_loader(detail=True)
-        for province_name, province_data in china.items():
-            if province_name.startswith("_"):
-                continue
-            for city_name, city_data in province_data.items():
-                if city_name.startswith("_"):
+        clean_path = Path(__file__).resolve().parents[1] / "data" / "clean" / "towns.csv"
+        with clean_path.open(encoding="utf-8", newline="") as file_obj:
+            for row in csv.DictReader(file_obj):
+                override = TOWN_NAME_OVERRIDES.get(
+                    (row["province_name"], row["city_name"], row["county_name"], row["town_name"])
+                )
+                if row.get("enabled") != "1" and override is None:
                     continue
-                normalized_city = city_name
-                for county_name, county_data in city_data.items():
-                    if county_name.startswith("_"):
-                        continue
-                    county_key = (province_name, normalized_city, county_name)
-                    for town_name in county_data.keys():
-                        if town_name.startswith("_"):
-                            continue
-                        alias, suffix = self._derive_alias(town_name)
-                        record = TownRecord(
-                            province=province_name,
-                            city=normalized_city,
-                            county=county_name,
-                            name=town_name,
-                            alias=alias,
-                            suffix=suffix,
-                        )
-                        self.records_by_county[county_key].append(record)
-                        if alias:
-                            self.alias_map_by_county[county_key][alias].append(record)
+                town_name = override[0] if override else row["town_name"]
+                alias = override[1] if override else (row["town_short_name"].strip() or None)
+                if alias == town_name:
+                    alias = None
+                suffix = self._derive_alias(town_name)[1]
+                record = TownRecord(
+                    province=row["province_name"],
+                    city=row["city_name"],
+                    county=row["county_name"],
+                    name=town_name,
+                    alias=alias,
+                    suffix=suffix,
+                )
+                county_key = (record.province, record.city, record.county)
+                self.records_by_county[county_key].append(record)
+                if alias:
+                    self.alias_map_by_county[county_key][alias].append(record)
 
     @staticmethod
     def _derive_alias(town_name: str) -> tuple[str | None, str | None]:
