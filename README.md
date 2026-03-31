@@ -1,12 +1,15 @@
-# 址衡 Address Engine
+# Address Engine
 
 > 中文联系人信息结构化抽取与地址智能纠错服务
 
 ---
 
+## 项目简介
+
+** Address Engine** 是一个基于 Flask 的轻量级中文收件信息解析服务，专为电商、物流、CRM 等场景设计。
+
 ## 目录
 
-- [项目简介](#项目简介)
 - [核心能力](#核心能力)
 - [系统架构](#系统架构)
 - [解析流程](#解析流程)
@@ -21,10 +24,6 @@
 - [已知边界与注意事项](#已知边界与注意事项)
 
 ---
-
-## 项目简介
-
-**址衡 Address Engine** 是一个基于 Flask 的轻量级中文收件信息解析服务，专为电商、物流、CRM 等场景设计。
 
 它能从一段非结构化的自由文本中，同时提取：
 
@@ -42,14 +41,14 @@
 
 ### 姓名抽取
 
-| 场景 | 示例输入 | 识别结果 |
-|------|---------|---------|
-| 标签式（收件人 / 联系人等） | `收件人张三，...` | `张三` |
-| 无标签前置姓名 + 地址上下文 | `张三 上海市徐汇区...` | `张三` |
-| 称谓前置（姓名紧邻手机号） | `王先生13511112222` | `王先生` |
-| 复姓 | `欧阳娜娜 上海市...` | `欧阳娜娜` |
-| 黑名单过滤 | `客服 上海市...` | `null` |
-| 四字常见词过滤 | `王者荣耀 上海市...` | `null` |
+| 场景                        | 示例输入               | 识别结果   |
+| --------------------------- | ---------------------- | ---------- |
+| 标签式（收件人 / 联系人等） | `收件人张三，...`      | `张三`     |
+| 无标签前置姓名 + 地址上下文 | `张三 上海市徐汇区...` | `张三`     |
+| 称谓前置（姓名紧邻手机号）  | `王先生13511112222`    | `王先生`   |
+| 复姓                        | `欧阳娜娜 上海市...`   | `欧阳娜娜` |
+| 黑名单过滤                  | `客服 上海市...`       | `null`     |
+| 四字常见词过滤              | `王者荣耀 上海市...`   | `null`     |
 
 ### 电话抽取
 
@@ -215,9 +214,9 @@ Content-Type: application/json
 
 **请求体**
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `text` | string | 是 | 待解析的自由文本，不能为空 |
+| 字段   | 类型   | 必填 | 说明                       |
+| ------ | ------ | ---- | -------------------------- |
+| `text` | string | 是   | 待解析的自由文本，不能为空 |
 
 **请求示例**
 
@@ -237,7 +236,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/parse \
     "text": "收件人张三，电话13800138000，地址广东省深圳市南山区科技园科苑路15号",
     "person": { "name": "张三", "source": "rule" },
     "phones": [
-      { "number": "13800138000", "type": "手机", "province": "广东", "city": "深圳" }
+      {
+        "number": "13800138000",
+        "type": "手机",
+        "province": "广东",
+        "city": "深圳"
+      }
     ],
     "address": {
       "raw": "收件人张三，电话13800138000，地址广东省深圳市南山区科技园科苑路15号",
@@ -262,7 +266,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/parse \
 HTTP 状态码：`400`
 
 ```json
-{"code": 400, "error": "`text` must be a non-empty string"}
+{ "code": 400, "error": "`text` must be a non-empty string" }
 ```
 
 ---
@@ -277,11 +281,11 @@ GET /api/v1/regions/tree
 
 **查询参数（Query Params）**
 
-| 参数名 | 类型 | 说明 | 联动逻辑 |
-|--------|------|------|---------|
-| `province` | string | *(可选)* 省/直辖市名称 | 传空时返回全国各省级节点列表 |
-| `city`     | string | *(可选)* 城市名称 | 依赖 `province`，传入时返回该市下属区县级联 |
-| `county`   | string | *(可选)* 区县名称 | 依赖前两者，传入时返回下属乡镇/街道级联 |
+| 参数名     | 类型   | 说明                   | 联动逻辑                                    |
+| ---------- | ------ | ---------------------- | ------------------------------------------- |
+| `province` | string | _(可选)_ 省/直辖市名称 | 传空时返回全国各省级节点列表                |
+| `city`     | string | _(可选)_ 城市名称      | 依赖 `province`，传入时返回该市下属区县级联 |
+| `county`   | string | _(可选)_ 区县名称      | 依赖前两者，传入时返回下属乡镇/街道级联     |
 
 **查询规则**
 
@@ -326,7 +330,13 @@ curl "http://127.0.0.1:8000/api/v1/regions/tree?province=上海市&city=上海�
               "code": "12017",
               "level": "county",
               "children": [
-                { "label": "徐泾镇", "value": "徐泾镇", "code": "1201703", "level": "town", "children": [] }
+                {
+                  "label": "徐泾镇",
+                  "value": "徐泾镇",
+                  "code": "1201703",
+                  "level": "town",
+                  "children": []
+                }
               ]
             }
           ]
@@ -342,13 +352,13 @@ curl "http://127.0.0.1:8000/api/v1/regions/tree?province=上海市&city=上海�
 直接传 `city` 但未传 `province` 时，HTTP 状态码：`400`
 
 ```json
-{"code": 400, "error": "`city` requires `province`."}
+{ "code": 400, "error": "`city` requires `province`." }
 ```
 
 区划不存在时，HTTP 状态码：`400`
 
 ```json
-{"code": 400, "error": "Province `不存在省份` not found."}
+{ "code": 400, "error": "Province `不存在省份` not found." }
 ```
 
 ---
@@ -357,56 +367,56 @@ curl "http://127.0.0.1:8000/api/v1/regions/tree?province=上海市&city=上海�
 
 ### `person` 对象
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `name` | string \| null | 识别到的姓名，未识别则为 null |
-| `source` | string | 识别来源：`rule`（标签/称谓规则）或 `heuristic`（启发式推断） |
+| 字段     | 类型           | 说明                                                          |
+| -------- | -------------- | ------------------------------------------------------------- |
+| `name`   | string \| null | 识别到的姓名，未识别则为 null                                 |
+| `source` | string         | 识别来源：`rule`（标签/称谓规则）或 `heuristic`（启发式推断） |
 
 ### `phones` 数组（每项）
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `number` | string | 号码（已去除空格） |
-| `type` | string \| null | 号码类型（手机 / 固话等） |
-| `province` | string \| null | 归属省份 |
-| `city` | string \| null | 归属城市 |
+| 字段       | 类型           | 说明                      |
+| ---------- | -------------- | ------------------------- |
+| `number`   | string         | 号码（已去除空格）        |
+| `type`     | string \| null | 号码类型（手机 / 固话等） |
+| `province` | string \| null | 归属省份                  |
+| `city`     | string \| null | 归属城市                  |
 
 ### `address` 对象
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `raw` | string | 原始输入文本 |
-| `parsed_text` | string | 剥离姓名 / 电话后的地址净化文本 |
-| `province` | string \| null | 省/直辖市 |
-| `city` | string \| null | 市/地区 |
-| `county` | string \| null | 区/县/旗 |
-| `town` | string \| null | 乡镇/街道 |
-| `detail` | string \| null | 详细地址（街路门牌楼层等） |
-| `standardized` | string \| null | 标准化拼接地址 |
-| `confidence` | string | 置信度：`high` / `medium` / `low` |
-| `resolved_by` | string | 解析来源（见下表） |
-| `auto_corrected` | boolean | 是否发生了自动纠正 |
-| `needs_review` | boolean | 是否建议人工复核 |
-| `warnings` | string[] | 风险说明列表 |
-| `corrections` | object[] | 纠正记录，每条含 `field` / `from` / `to` / `reason` |
-| `alternatives` | object[] | 区县重名时的候选地址列表 |
+| 字段             | 类型           | 说明                                                |
+| ---------------- | -------------- | --------------------------------------------------- |
+| `raw`            | string         | 原始输入文本                                        |
+| `parsed_text`    | string         | 剥离姓名 / 电话后的地址净化文本                     |
+| `province`       | string \| null | 省/直辖市                                           |
+| `city`           | string \| null | 市/地区                                             |
+| `county`         | string \| null | 区/县/旗                                            |
+| `town`           | string \| null | 乡镇/街道                                           |
+| `detail`         | string \| null | 详细地址（街路门牌楼层等）                          |
+| `standardized`   | string \| null | 标准化拼接地址                                      |
+| `confidence`     | string         | 置信度：`high` / `medium` / `low`                   |
+| `resolved_by`    | string         | 解析来源（见下表）                                  |
+| `auto_corrected` | boolean        | 是否发生了自动纠正                                  |
+| `needs_review`   | boolean        | 是否建议人工复核                                    |
+| `warnings`       | string[]       | 风险说明列表                                        |
+| `corrections`    | object[]       | 纠正记录，每条含 `field` / `from` / `to` / `reason` |
+| `alternatives`   | object[]       | 区县重名时的候选地址列表                            |
 
 ### `resolved_by` 取值
 
-| 取值 | 含义 |
-|------|------|
-| `exact_county` | 区县名称唯一精确匹配 |
-| `exact_county_disambiguated` | 区县重名经上下文消歧后确定 |
-| `exact_city` | 城市名称唯一精确匹配 |
-| `exact_city_disambiguated` | 城市重名经上下文消歧后确定 |
-| `jionlp_cpca_consensus` | JioNLP 与 CPCA 双引擎结果一致 |
-| `jionlp` | 仅由 JioNLP 支撑 |
-| `cpca` | 仅由 CPCA 支撑（置信度较低，标记 `needs_review`） |
-| `fuzzy_county` | 区县轻微错字经模糊纠正 |
-| `road_fallback` | 路名 POI 回退补全区县（需启用可选功能） |
-| `road_conflict_correction` | 路名 POI 与现有区县冲突，执行了纠正 |
-| `jionlp_multi_county` | 文本含多区县，采用 JioNLP 结果消歧 |
-| `none` | 未能解析出任何行政区划 |
+| 取值                         | 含义                                              |
+| ---------------------------- | ------------------------------------------------- |
+| `exact_county`               | 区县名称唯一精确匹配                              |
+| `exact_county_disambiguated` | 区县重名经上下文消歧后确定                        |
+| `exact_city`                 | 城市名称唯一精确匹配                              |
+| `exact_city_disambiguated`   | 城市重名经上下文消歧后确定                        |
+| `jionlp_cpca_consensus`      | JioNLP 与 CPCA 双引擎结果一致                     |
+| `jionlp`                     | 仅由 JioNLP 支撑                                  |
+| `cpca`                       | 仅由 CPCA 支撑（置信度较低，标记 `needs_review`） |
+| `fuzzy_county`               | 区县轻微错字经模糊纠正                            |
+| `road_fallback`              | 路名 POI 回退补全区县（需启用可选功能）           |
+| `road_conflict_correction`   | 路名 POI 与现有区县冲突，执行了纠正               |
+| `jionlp_multi_county`        | 文本含多区县，采用 JioNLP 结果消歧                |
+| `none`                       | 未能解析出任何行政区划                            |
 
 ---
 
@@ -426,11 +436,11 @@ curl "http://127.0.0.1:8000/api/v1/regions/tree?province=上海市&city=上海�
 
 ## 置信度规则
 
-| 条件 | 置信度 |
-|------|------|
-| 省 + 市 + 区县均已确定，且来源非 CPCA 单引擎，且无 `needs_review` | `high` |
-| 省 + 市已确定（含 `needs_review` 情形） | `medium` |
-| 仅有区县或完全无法解析 | `low` |
+| 条件                                                              | 置信度   |
+| ----------------------------------------------------------------- | -------- |
+| 省 + 市 + 区县均已确定，且来源非 CPCA 单引擎，且无 `needs_review` | `high`   |
+| 省 + 市已确定（含 `needs_review` 情形）                           | `medium` |
+| 仅有区县或完全无法解析                                            | `low`    |
 
 ---
 
@@ -462,12 +472,12 @@ docker compose down
 
 ### 生产参数（Gunicorn）
 
-| 参数 | 值 |
-|------|-----|
-| 绑定地址 | `0.0.0.0:8000` |
-| Worker 数 | 2 |
-| Thread 数 | 2 |
-| 超时时间 | 120s |
+| 参数      | 值             |
+| --------- | -------------- |
+| 绑定地址  | `0.0.0.0:8000` |
+| Worker 数 | 2              |
+| Thread 数 | 2              |
+| 超时时间  | 120s           |
 
 ### 健康检查
 
@@ -477,13 +487,13 @@ docker compose down
 
 ## 依赖说明
 
-| 依赖 | 版本 | 作用 |
-|------|------|------|
-| Flask | 3.1.3 | HTTP 服务框架 |
-| jionlp | 1.5.27 | 中文地址 NLP 解析（含电话归属地） |
-| cpca | 0.5.5 | 省市区抽取 |
-| gunicorn | 23.0.0 | 生产环境 WSGI 服务器 |
-| pytest | 9.0.2 | 单元测试框架 |
+| 依赖     | 版本   | 作用                              |
+| -------- | ------ | --------------------------------- |
+| Flask    | 3.1.3  | HTTP 服务框架                     |
+| jionlp   | 1.5.27 | 中文地址 NLP 解析（含电话归属地） |
+| cpca     | 0.5.5  | 省市区抽取                        |
+| gunicorn | 23.0.0 | 生产环境 WSGI 服务器              |
+| pytest   | 9.0.2  | 单元测试框架                      |
 
 ---
 
