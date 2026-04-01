@@ -31,7 +31,7 @@ PHONE_PATTERN = re.compile(
 )
 HONORIFIC_SUFFIXES = ("先生", "女士", "小姐", "太太")
 PHONE_ADJACENT_NAME_PATTERN = re.compile(
-    rf"(?:^|[\s,，;；/])([\u4e00-\u9fff]{{2,4}}|[\u4e00-\u9fff]{{1,4}}(?:{'|'.join(HONORIFIC_SUFFIXES)}))\s*"
+    rf"(?:^|[\s,，;；/])([\u4e00-\u9fff]{{2,4}}|[\u4e00-\u9fff]{{1,4}}(?:{'|'.join(HONORIFIC_SUFFIXES)}))[\s,，;；/]*"
     rf"(?=(?:\+?86[-\s]?)?(?:1[3-9]\d{{9}}|0\d{{2,3}}-?\d{{7,8}}))"
 )
 COUNTY_TOKEN_PATTERN = re.compile(r"([\u4e00-\u9fff]{2,8}(?:区|县|旗|市))")
