@@ -39,6 +39,9 @@ LEADING_CHINESE_BLOCK_PATTERN = re.compile(r"^\s*([\u4e00-\u9fff]{2,12})")
 LEADING_SEPARATORS = " ，,：:;；/"
 ADDRESS_HINT_CHARS = "省市区县旗乡镇街道路巷村社区苑号栋单元室园厦"
 LEADING_NAME_PATTERN = re.compile(r"^\s*([\u4e00-\u9fff]{2,4})(?:[\s,，;；/]+)(.+)$")
+ADDRESS_LABEL_PATTERN = re.compile(
+    r"(?:电话|手机|联系方式|电话号码|地址|收件地址|收货地址|邮寄地址|联系地址)[:：]?\s*"
+)
 COMMON_SINGLE_SURNAMES = set(
     "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
     "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史"
@@ -54,6 +57,7 @@ COMMON_SINGLE_SURNAMES = set(
     "终暨居衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾"
     "敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖"
     "益桓公仉督岳帅缑亢况郈有琴归海晋楚闫法汝鄢涂钦岳帅"
+    "海宇鑫浩涛磊杰帅"
 )
 COMPOUND_SURNAMES = {
     "欧阳", "太史", "端木", "上官", "司马", "东方", "独孤", "南宫", "万俟", "闻人", "夏侯", "诸葛",
@@ -65,10 +69,12 @@ COMPOUND_SURNAMES = {
     "南荣", "东里", "东宫", "仲长", "子书", "子桑", "即墨", "达奚", "褚师",
 }
 HEURISTIC_NAME_BLACKLIST = {
-    "客服", "售后", "麻烦", "烦请", "请问", "您好", "你好", "谢谢", "感谢", "测试", "匿名", "默认",
-    "本人", "自己", "地址", "电话", "手机", "收货", "发货", "快递", "物流", "门卫", "前台", "仓库",
-    "王者", "荣耀", "家人", "朋友", "客户", "用户", "老板", "经理", "老师", "师傅", "同学",
+ "客服", "售后", "麻烦", "烦请", "请问", "您好", "你好", "谢谢", "感谢", "测试", "匿名", "默认",
+ "本人", "自己", "地址", "电话", "手机", "收货", "发货", "快递", "物流", "门卫", "前台", "仓库",
+ "王者", "荣耀", "家人", "朋友", "客户", "用户", "老板", "经理", "老师", "师傅", "同学",
 }
+
+COUNTY_SUFFIX_ARTIFACT_THRESHOLD = 0.66
 
 
 class AddressExtractionService:
@@ -91,7 +97,7 @@ class AddressExtractionService:
             "text": normalized_text,
             "person": {
                 "name": name,
-                "source": "rule" if name and inferred_name != name else ("heuristic" if name else "rule"),
+                "source": "rule" if name and inferred_name != name else ("heuristic" if name else None),
             },
             "phones": phones,
             "address": address,
@@ -125,6 +131,8 @@ class AddressExtractionService:
             if number in seen:
                 continue
             seen.add(number)
+                # NOTE: jionlp phone_location may return type=unknown for test numbers (e.g. 13800138000)
+                # or outdated number segments. Consider a dedicated phone location library in future.
             location = jio.phone_location(number)
             phones.append(
                 {
@@ -142,6 +150,9 @@ class AddressExtractionService:
         for pattern in NAME_SEGMENT_PATTERNS:
             cleaned = pattern.sub(" ", cleaned)
         cleaned = self._strip_extracted_name_segment(cleaned, extracted_name)
+
+        # Strip label words left behind after phone/name removal (issue #4)
+        cleaned = ADDRESS_LABEL_PATTERN.sub(" ", cleaned)
 
         inferred_name = None
         if extracted_name is None:
@@ -242,6 +253,8 @@ class AddressExtractionService:
 
     def _parse_address(self, text: str, raw_text: str | None = None) -> dict:
         raw_text = raw_text or text
+
+        # ── Phase 1: Gather parsing inputs ──────────────────────────
         jio_result = jio.parse_location(text, town_village=True)
         cpca_result = self._parse_cpca(text)
         exact_mentions = self.admin_index.find_exact_mentions(text)
@@ -269,6 +282,7 @@ class AddressExtractionService:
         town_match: TownMatch | None = None
         fuzzy_city_token: str | None = None
 
+        # ── Phase 2: Select best admin record (exact → fuzzy → consensus) ──
         exact_provinces = sorted({record.province for record in exact_mentions["province"]})
         exact_cities = sorted({record.city for record in exact_mentions["city"] if record.city})
         exact_counties = sorted({record.county for record in exact_mentions["county"] if record.county})
@@ -330,6 +344,8 @@ class AddressExtractionService:
                 source = "cpca"
 
         if selected is not None:
+
+            # ── Phase 3: Post-selection corrections & enrichment ─────
             field_corrections = self._build_conflict_corrections(selected, exact_provinces, exact_cities)
             if field_corrections:
                 corrections.extend(field_corrections)
@@ -447,6 +463,7 @@ class AddressExtractionService:
                 )
 
         if selected is None and alternatives:
+            # ── Phase 4: Build result (no selection — ambiguous) ─────
             county_name = exact_counties[0] if len(exact_counties) == 1 else None
             detail = self._clean_detail(jio_result.get("detail") or cpca_result.get("detail"), county_name)
             confidence = "low"
@@ -480,6 +497,8 @@ class AddressExtractionService:
         province = selected.province if selected else None
         city = selected.city if selected else None
         county = selected.county if selected else None
+
+        # ── Phase 5: Build result (with selection) ────────────────
         town = (
             road_poi_match.town
             if road_poi_match and road_poi_match.town
@@ -815,9 +834,13 @@ class AddressExtractionService:
         if not detail:
             return detail
         cleaned = detail.strip()
-        for prefix in prefixes:
-            if prefix and cleaned.startswith(prefix):
+        # Sort prefixes by length (longest first) to prevent shorter prefix
+        # from matching when a longer, more specific prefix exists (issue #10)
+        sorted_prefixes = sorted((p for p in prefixes if p), key=len, reverse=True)
+        for prefix in sorted_prefixes:
+            if cleaned.startswith(prefix):
                 cleaned = cleaned[len(prefix):].lstrip(LEADING_SEPARATORS)
+                break  # Only strip the best (longest) matching prefix
         return cleaned.strip() or None
 
     @staticmethod
@@ -836,7 +859,7 @@ class AddressExtractionService:
             return detail
         if typo_token not in text:
             return detail
-        if SequenceMatcher(None, typo_token, county).ratio() < 0.66:
+        if SequenceMatcher(None, typo_token, county).ratio() < COUNTY_SUFFIX_ARTIFACT_THRESHOLD:
             return detail
         return detail[1:].lstrip(LEADING_SEPARATORS) or None
 

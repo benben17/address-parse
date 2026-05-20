@@ -287,6 +287,22 @@ class AdminIndex:
             return None
 
         fragment_pinyin = self._to_pinyin(fragment)
+
+        # Pre-filter candidates by pinyin prefix match (issue #6)
+        # Only do expensive SequenceMatcher on candidates whose pinyin shares
+        # a common prefix with the fragment pinyin.
+        pinyin_candidates: set[str] = set()
+        if fragment_pinyin:
+            for key, records in self.pinyin_index_by_rank.get(rank, {}).items():
+                if key and (key.startswith(fragment_pinyin[:2]) or fragment_pinyin.startswith(key[:2])):
+                    for rec in records:
+                        pinyin_candidates.add(rec.adcode)
+        # If pinyin pre-filter found nothing or too few, fall back to all candidates
+        if len(pinyin_candidates) >= 3:
+            filtered = [c for c in candidates if c.adcode in pinyin_candidates]
+            if filtered:
+                candidates = filtered
+
         best_record = None
         best_score = 0.0
         second_best = 0.0

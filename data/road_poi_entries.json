@@ -1,0 +1,9 @@
+[
+  {"kind": "road", "keyword": "虹漕路", "province": "上海市", "city": "上海市", "county": "徐汇区"},
+  {"kind": "road", "keyword": "漕溪北路", "province": "上海市", "city": "上海市", "county": "徐汇区"},
+  {"kind": "road", "keyword": "酒仙桥东路", "province": "北京市", "city": "北京市", "county": "朝阳区"},
+  {"kind": "road", "keyword": "体育西路", "province": "广东省", "city": "广州市", "county": "天河区"},
+  {"kind": "road", "keyword": "科苑路", "province": "广东省", "city": "深圳市", "county": "南山区"},
+  {"kind": "poi", "keyword": "望京SOHO", "province": "北京市", "city": "北京市", "county": "朝阳区"},
+  {"kind": "town", "keyword": "徐泾镇", "province": "上海市", "city": "上海市", "county": "青浦区", "town": "徐泾镇"}
+]

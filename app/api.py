@@ -10,9 +10,9 @@ service = AddressExtractionService()
 region_tree_service = RegionTreeService()
 
 
-def _success(payload: dict, status_code: int = 200, wrap_data: bool = False) -> tuple:
-    body = {"code": status_code, "data": payload} if wrap_data else {"code": status_code, **payload}
-    return jsonify(body), status_code
+def _success(payload: dict, status_code: int = 200) -> tuple:
+    """Unified response: always wraps payload under 'data' key (issue #11)."""
+    return jsonify({"code": status_code, "data": payload}), status_code
 
 
 def _error(message: str, status_code: int = 400) -> tuple:
@@ -39,7 +39,7 @@ def create_app() -> Flask:
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():
             return _error("`text` must be a non-empty string")
-        return _success(service.parse_text(text), wrap_data=True)
+        return _success(service.parse_text(text))
 
     @app.get("/api/v1/regions/tree")
     def region_tree() -> tuple:
