@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pre-extract JioNLP dictionaries during image build so the container can start directly.
 RUN python -c "import jionlp"
 
+COPY data ./data
 COPY app ./app
 COPY README.md ./README.md
 
